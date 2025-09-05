@@ -22,81 +22,71 @@ MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIO
 CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
 RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
 
-# Load data from URL
+# Load data from URL with optimizations
 @st.cache_data
-def load_data_from_url(url):
+def load_data_from_url(url, sample_size=None):
     response = requests.get(url)
     response.raise_for_status()
-    return pd.read_csv(StringIO(response.text))
+    
+    # Read only the first few rows for faster loading during development
+    if sample_size:
+        # Read the first sample_size rows
+        df = pd.read_csv(StringIO(response.text), nrows=sample_size)
+    else:
+        df = pd.read_csv(StringIO(response.text))
+    
+    return df
 
-# Load and preprocess datasets
+# Load and preprocess datasets with optimizations
 @st.cache_resource
 def load_data():
-    # Load datasets
-    with st.spinner("Loading movies dataset..."):
-        movies = load_data_from_url(MOVIES_URL)
+    # Load datasets with smaller sample size for faster loading
+    with st.spinner("Loading movies dataset (sampled for speed)..."):
+        movies = load_data_from_url(MOVIES_URL, sample_size=5000)  # Reduced sample size
     
-    with st.spinner("Loading credits dataset..."):
-        credits = load_data_from_url(CREDITS_URL)
+    with st.spinner("Loading credits dataset (sampled for speed)..."):
+        credits = load_data_from_url(CREDITS_URL, sample_size=5000)  # Reduced sample size
     
-    with st.spinner("Loading ratings dataset..."):
-        ratings = load_data_from_url(RATINGS_URL)
+    with st.spinner("Loading ratings dataset (sampled for speed)..."):
+        ratings = load_data_from_url(RATINGS_URL, sample_size=10000)  # Reduced sample size
 
     # Filter movies with at least 50 votes
     movies = movies[movies['vote_count'] > 50]
 
-    # Convert IDs to numeric
-    movies['id'] = pd.to_numeric(movies['id'], errors='coerce')
-    credits['id'] = pd.to_numeric(credits['id'], errors='coerce')
-    ratings['movieId'] = pd.to_numeric(ratings['movieId'], errors='coerce')
+    # Convert IDs to numeric - faster approach
+    movies['id'] = pd.to_numeric(movies['id'], errors='coerce', downcast='integer')
+    credits['id'] = pd.to_numeric(credits['id'], errors='coerce', downcast='integer')
+    ratings['movieId'] = pd.to_numeric(ratings['movieId'], errors='coerce', downcast='integer')
 
     # Drop missing IDs
     movies = movies.dropna(subset=['id'])
     credits = credits.dropna(subset=['id'])
     ratings = ratings.dropna(subset=['movieId'])
 
-    movies['id'] = movies['id'].astype(int)
-    credits['id'] = credits['id'].astype(int)
-    ratings['movieId'] = ratings['movieId'].astype(int)
-
-    # Merge datasets
+    # Merge datasets - inner join for faster processing
     movies = movies.merge(credits, on='id', how='inner')
     
-    # Clean features
+    # Clean features - simplified approach
     movies['overview'] = movies['overview'].fillna('')
     movies['tagline'] = movies['tagline'].fillna('')
     movies['description'] = movies['overview'] + " " + movies['tagline']
 
     # Keep only needed columns
-    movies = movies[['id','title','description','genres','cast','crew']]
+    movies = movies[['id','title','description','genres','cast','crew']].copy()
 
-    # Parse JSON-like fields
-    def parse_genres(obj):
+    # Parse JSON-like fields with error handling
+    def parse_json_field(obj, field_name='name', max_items=3):
         try:
-            return [i['name'] for i in ast.literal_eval(obj)]
+            parsed = ast.literal_eval(obj)
+            if isinstance(parsed, list):
+                return [item[field_name] for item in parsed[:max_items]]
+            return []
         except:
             return []
 
-    def parse_cast(obj):
-        try:
-            return [i['name'] for i in ast.literal_eval(obj)[:3]]  # top 3 actors
-        except:
-            return []
-
-    def parse_crew(obj):
-        try:
-            return [i['name'] for i in ast.literal_eval(obj) if i['job'] == 'Director']
-        except:
-            return []
-
-    movies['genres'] = movies['genres'].apply(parse_genres)
-    movies['cast'] = movies['cast'].apply(parse_cast)
-    movies['crew'] = movies['crew'].apply(parse_crew)
-
-    # Convert lists → strings
-    movies['genres'] = movies['genres'].apply(lambda x: " ".join(x))
-    movies['cast'] = movies['cast'].apply(lambda x: " ".join(x))
-    movies['crew'] = movies['crew'].apply(lambda x: " ".join(x))
+    movies['genres'] = movies['genres'].apply(lambda x: " ".join(parse_json_field(x)))
+    movies['cast'] = movies['cast'].apply(lambda x: " ".join(parse_json_field(x)))
+    movies['crew'] = movies['crew'].apply(lambda x: " ".join(parse_json_field(x, 'name', 1)))  # Only director
 
     # Combine final features
     movies['final_features'] = (
@@ -110,8 +100,8 @@ def load_data():
 
 @st.cache_resource
 def create_tfidf_model(movies):
-    # TF-IDF Vectorization
-    tfidf = TfidfVectorizer(stop_words='english', max_features=5000)
+    # TF-IDF Vectorization with reduced features for faster processing
+    tfidf = TfidfVectorizer(stop_words='english', max_features=1000)  # Reduced from 5000 to 1000
     vectors = tfidf.fit_transform(movies['final_features'])
     content_similarity = cosine_similarity(vectors)
     return tfidf, vectors, content_similarity
@@ -135,8 +125,11 @@ def prepare_collaborative_data(movies, ratings):
     }
     ratings['user_name'] = ratings['userId'].replace(user_mapping)
 
-    # Create user-item matrix
-    user_item_matrix = ratings.pivot_table(
+    # Create user-item matrix with only top users for faster processing
+    top_users = ratings['user_name'].value_counts().head(10).index  # Only top 10 users
+    ratings_filtered = ratings[ratings['user_name'].isin(top_users)]
+    
+    user_item_matrix = ratings_filtered.pivot_table(
         index='user_name', columns='title', values='rating'
     ).fillna(0)
 
@@ -144,7 +137,7 @@ def prepare_collaborative_data(movies, ratings):
     user_sim = cosine_similarity(user_item_matrix)
     user_sim_df = pd.DataFrame(user_sim, index=user_item_matrix.index, columns=user_item_matrix.index)
     
-    return ratings, user_item_matrix, user_sim_df
+    return ratings_filtered, user_item_matrix, user_sim_df
 
 # Content-based recommendation function
 def content_based_recommend(movie_title, movies, content_similarity, top_n=10):
@@ -169,7 +162,7 @@ def collaborative_recommend(user_name, user_item_matrix, user_sim_df, top_n=50):
 
     # Find similar users
     sim_scores = user_sim_df[user_name].drop(user_name).sort_values(ascending=False)
-    top_users = sim_scores.index[:5]
+    top_users = sim_scores.index[:3]  # Reduced from 5 to 3 for speed
 
     # Average ratings of top neighbors
     neighbor_ratings = user_item_matrix.loc[top_users].mean(axis=0)
@@ -185,10 +178,10 @@ def collaborative_recommend(user_name, user_item_matrix, user_sim_df, top_n=50):
 # Hybrid recommendation function
 def hybrid_recommend(user_name, liked_movie, movies, content_similarity, user_item_matrix, user_sim_df, alpha=0.5, top_n=10):
     if not user_name or user_name.strip() == "" or user_name == "-":
-        random_id = random.randint(6, 671)
-        user_name = f"User_{random_id}"
+        # Use a random existing user instead of creating a new one
+        user_name = random.choice(user_item_matrix.index.tolist())
         
-    collab_scores = collaborative_recommend(user_name, user_item_matrix, user_sim_df, top_n=50)
+    collab_scores = collaborative_recommend(user_name, user_item_matrix, user_sim_df, top_n=30)  # Reduced from 50
 
     if liked_movie not in movies['title'].values:
         return user_name, [("❌ Movie not found", 0.0)]
@@ -196,7 +189,7 @@ def hybrid_recommend(user_name, liked_movie, movies, content_similarity, user_it
     idx = movies.index[movies['title'] == liked_movie][0]
     cs = list(enumerate(content_similarity[idx]))
     cs = sorted(cs, key=lambda x: x[1], reverse=True)
-    content_scores = {movies.iloc[i].title: s for i, s in cs[1:51]}
+    content_scores = {movies.iloc[i].title: s for i, s in cs[1:31]}  # Reduced from 51
 
     # Merge both approaches
     all_titles = set(collab_scores.keys()) | set(content_scores.keys())
@@ -213,11 +206,22 @@ def hybrid_recommend(user_name, liked_movie, movies, content_similarity, user_it
 def main():
     st.title("🎬 Movie Recommender System")
     
-    # Load data
-    with st.spinner("Loading data and building models..."):
-        movies, ratings = load_data()
-        tfidf, vectors, content_similarity = create_tfidf_model(movies)
-        ratings, user_item_matrix, user_sim_df = prepare_collaborative_data(movies, ratings)
+    # Load data with progress indicator
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    status_text.text("Loading data...")
+    movies, ratings = load_data()
+    progress_bar.progress(33)
+    
+    status_text.text("Creating TF-IDF model...")
+    tfidf, vectors, content_similarity = create_tfidf_model(movies)
+    progress_bar.progress(66)
+    
+    status_text.text("Preparing collaborative data...")
+    ratings, user_item_matrix, user_sim_df = prepare_collaborative_data(movies, ratings)
+    progress_bar.progress(100)
+    status_text.text("Ready!")
     
     st.header("Movie Recommendations")
     
@@ -225,34 +229,35 @@ def main():
     rec_type = st.radio("Recommendation Type", ["Content-Based", "Hybrid"])
     
     # User selection (only for hybrid)
-    user_choices = ["-", "Bob", "Alice", "Charlie", "Diana", "Eve"]
+    user_choices = ["-"] + user_item_matrix.index.tolist()
     if rec_type == "Hybrid":
         user_choice = st.selectbox("Select Movie Critic", user_choices)
     else:
         user_choice = "-"
     
-    # Movie selection
+    # Movie selection with search
     movie_choices = sorted(movies['title'].unique().tolist())
     movie_title = st.selectbox("Select a Movie", movie_choices)
     
     # Number of recommendations
-    num_recs = st.slider("Number of Recommendations", 1, 20, 10)
+    num_recs = st.slider("Number of Recommendations", 1, 15, 5)  # Reduced max from 20 to 15
     
     # Get recommendations button
     if st.button("Get Recommendations"):
         if not movie_title or movie_title.strip() == "":
             st.error("❌ Please select a movie first.")
         else:
-            if rec_type == "Content-Based":
-                method_name, recs = content_based_recommend(movie_title, movies, content_similarity, top_n=num_recs)
-                resolved_user = "Content-Based Filtering"
-            else:  # Hybrid
-                user_input = "" if (user_choice is None or user_choice == "-") else user_choice
-                resolved_user, recs = hybrid_recommend(
-                    user_input, movie_title, movies, content_similarity, 
-                    user_item_matrix, user_sim_df, alpha=0.5, top_n=num_recs
-                )
-                method_name = "Hybrid recommendations"
+            with st.spinner("Generating recommendations..."):
+                if rec_type == "Content-Based":
+                    method_name, recs = content_based_recommend(movie_title, movies, content_similarity, top_n=num_recs)
+                    resolved_user = "Content-Based Filtering"
+                else:  # Hybrid
+                    user_input = "" if (user_choice is None or user_choice == "-") else user_choice
+                    resolved_user, recs = hybrid_recommend(
+                        user_input, movie_title, movies, content_similarity, 
+                        user_item_matrix, user_sim_df, alpha=0.5, top_n=num_recs
+                    )
+                    method_name = "Hybrid recommendations"
 
             # Check if we got an error message
             if isinstance(recs, str) or len(recs) == 0:
