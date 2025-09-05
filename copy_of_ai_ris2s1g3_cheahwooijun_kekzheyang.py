@@ -39,9 +39,9 @@ def download_file(url, dest_path):
                 f.write(chunk)
         st.write(f"✅ Saved to {dest_path}")
 
-MOVIES_URL = "https://drive.google.com/uc?export=download&id=YOUR_MOVIES_FILE_ID"
-CREDITS_URL = "https://drive.google.com/uc?export=download&id=YOUR_CREDITS_SMALL_FILE_ID"  # ⚠️ small version!
-RATINGS_URL = "https://drive.google.com/uc?export=download&id=YOUR_RATINGS_FILE_ID"
+MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
+CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
+RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
 
 movies_path = os.path.join(DATA_PATH, "movies_metadata.csv")
 credits_path = os.path.join(DATA_PATH, "credits_small.csv")  # ✅ small file
