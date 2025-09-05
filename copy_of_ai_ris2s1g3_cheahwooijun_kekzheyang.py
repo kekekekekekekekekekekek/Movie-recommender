@@ -39,13 +39,12 @@ def download_file(url, dest_path):
                 f.write(chunk)
         st.write(f"✅ Saved to {dest_path}")
 
-# 🔗 Replace with your own direct download links
-MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
-CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
-RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
+MOVIES_URL = "https://drive.google.com/uc?export=download&id=YOUR_MOVIES_FILE_ID"
+CREDITS_URL = "https://drive.google.com/uc?export=download&id=YOUR_CREDITS_SMALL_FILE_ID"  # ⚠️ small version!
+RATINGS_URL = "https://drive.google.com/uc?export=download&id=YOUR_RATINGS_FILE_ID"
 
 movies_path = os.path.join(DATA_PATH, "movies_metadata.csv")
-credits_path = os.path.join(DATA_PATH, "credits_small.csv")  # ⚠️ Use smaller file!
+credits_path = os.path.join(DATA_PATH, "credits_small.csv")  # ✅ small file
 ratings_path = os.path.join(DATA_PATH, "ratings_small.csv")
 
 download_file(MOVIES_URL, movies_path)
@@ -56,7 +55,17 @@ movies = pd.read_csv(movies_path, low_memory=False)
 credits = pd.read_csv(credits_path)
 ratings = pd.read_csv(ratings_path)
 
-# Merge movies with credits
+# Load
+movies = pd.read_csv(movies_path, low_memory=False)
+credits = pd.read_csv(credits_path)
+ratings = pd.read_csv(ratings_path)
+
+# ✅ Fix ids before merging
+movies['id'] = pd.to_numeric(movies['id'], errors='coerce')
+movies = movies.dropna(subset=['id'])
+movies['id'] = movies['id'].astype(int)
+
+# Merge works now
 movies = movies.merge(credits, on="id", how="inner")
 
 # Cell 4: Clean and prepare features
