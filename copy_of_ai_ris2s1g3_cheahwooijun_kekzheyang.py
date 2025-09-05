@@ -39,6 +39,7 @@ def download_file(url, dest_path):
                 f.write(chunk)
         st.write(f"✅ Saved to {dest_path}")
 
+# 🔗 Direct download links (make sure credits points to credits_small.csv!)
 MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
 CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
 RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
@@ -51,21 +52,17 @@ download_file(MOVIES_URL, movies_path)
 download_file(CREDITS_URL, credits_path)
 download_file(RATINGS_URL, ratings_path)
 
+# Load CSVs
 movies = pd.read_csv(movies_path, low_memory=False)
 credits = pd.read_csv(credits_path)
 ratings = pd.read_csv(ratings_path)
 
-# Load
-movies = pd.read_csv(movies_path, low_memory=False)
-credits = pd.read_csv(credits_path)
-ratings = pd.read_csv(ratings_path)
+# Debug info
+st.write("📂 Movies columns:", movies.columns.tolist())
+st.write("📂 Credits columns:", credits.columns.tolist())
+st.write("📂 Ratings columns:", ratings.columns.tolist())
 
-# ✅ Fix ids before merging
-movies['id'] = pd.to_numeric(movies['id'], errors='coerce')
-movies = movies.dropna(subset=['id'])
-movies['id'] = movies['id'].astype(int)
-
-# Fix IDs before merge
+# Fix IDs before merging
 movies['id'] = pd.to_numeric(movies['id'], errors='coerce')
 credits['id'] = pd.to_numeric(credits['id'], errors='coerce')
 movies = movies.dropna(subset=['id'])
@@ -73,8 +70,12 @@ credits = credits.dropna(subset=['id'])
 movies['id'] = movies['id'].astype(int)
 credits['id'] = credits['id'].astype(int)
 
-# merge
-movies = movies.merge(credits, on="id", how="inner")
+# Try merging
+try:
+    movies = movies.merge(credits, on="id", how="inner")
+    st.success(f"✅ Merge successful! Final movies shape: {movies.shape}")
+except Exception as e:
+    st.error(f"❌ Merge failed: {e}")
 
 
 # Cell 4: Clean and prepare features
