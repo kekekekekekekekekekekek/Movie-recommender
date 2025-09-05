@@ -65,8 +65,17 @@ movies['id'] = pd.to_numeric(movies['id'], errors='coerce')
 movies = movies.dropna(subset=['id'])
 movies['id'] = movies['id'].astype(int)
 
-# Merge works now
+# Fix IDs before merge
+movies['id'] = pd.to_numeric(movies['id'], errors='coerce')
+credits['id'] = pd.to_numeric(credits['id'], errors='coerce')
+movies = movies.dropna(subset=['id'])
+credits = credits.dropna(subset=['id'])
+movies['id'] = movies['id'].astype(int)
+credits['id'] = credits['id'].astype(int)
+
+# merge
 movies = movies.merge(credits, on="id", how="inner")
+
 
 # Cell 4: Clean and prepare features
 movies['overview'] = movies['overview'].fillna('')
