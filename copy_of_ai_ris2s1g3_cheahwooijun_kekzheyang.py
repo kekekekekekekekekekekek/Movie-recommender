@@ -70,7 +70,7 @@ def download_file(url, dest_path):
 
 #datasets
 MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
-CREDITS_URL = "https://drive.google.com/uc?export=download&id1cAviLW6s4O30e3RBnTHus1KdUqt1iMw9="
+CREDITS_URL = "https://drive.google.com/uc?export=download&id=1cAviLW6s4O30e3RBnTHus1KdUqt1iMw9"
 RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
 
 movies_path = os.path.join(DATA_PATH, "movies_metadata.csv")
