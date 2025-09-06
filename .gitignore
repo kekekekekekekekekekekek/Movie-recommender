@@ -2,6 +2,27 @@ __pycache__/
 *.pyc
 *.pyo
 *.ipynb_checkpoints
-.env
+.env# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+env/
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Streamlit logs
+.streamlit/
+
 .venv/
 .DS_Store
+
