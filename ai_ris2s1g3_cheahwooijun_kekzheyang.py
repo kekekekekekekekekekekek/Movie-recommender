@@ -7,99 +7,93 @@ Original file is located at
     https://colab.research.google.com/drive/1R2O5ujMSQUzw13LxybT4-Y4ICtWgt2OP
 """
 
-# ====================
-# 📦 Imports & Setup
-# ====================
+# Core imports
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests
 import joblib
-import os
-from sklearn.metrics.pairwise import cosine_similarity, linear_kernel
+from io import BytesIO
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-st.set_page_config(page_title="Movie Recommender", page_icon="🎬", layout="wide")
+# Set page config
+st.set_page_config(page_title="🎬 Movie Recommender", layout="wide")
 
-# ====================
-# 📥 Load Data
-# ====================
-import pandas as pd
-
-# Movie dataset URLs (from your Drive / Cell 2)
+# Google Drive direct download links
 MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
 CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
 RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
 
+@st.cache_data
+def load_data(url):
+    return pd.read_csv(url, low_memory=False)
 
-# Helper function to download CSVs
-def load_csv(url):
-    return pd.read_csv(url, low_memory=False)  # suppress DtypeWarning
+movies = load_data(MOVIES_URL)
+credits = load_data(CREDITS_URL)
+ratings = load_data(RATINGS_URL)
 
-# Load datasets
-movies = load_csv(MOVIES_URL)
-credits = load_csv(CREDITS_URL)
-ratings = load_csv(RATINGS_URL)
+st.write("✅ Datasets loaded successfully!")
 
-# Preview data (optional, for debugging)
-st.write("Movies dataset:", movies.head())
-st.write("Credits dataset:", credits.head())
-st.write("Ratings dataset:", ratings.head())
+# Aggregate duplicate ratings
+ratings_aggregated = ratings.groupby(['userId', 'movieId'])['rating'].mean().reset_index()
 
+# Create ratings matrix
+ratings_matrix = ratings_aggregated.pivot(index="userId", columns="movieId", values="rating").fillna(0)
 
-# ====================
-# 🧹 Preprocessing with Joblib
-# ====================
+# Compute user similarity
+user_sim = cosine_similarity(ratings_matrix)
+user_sim_df = pd.DataFrame(user_sim, index=ratings_matrix.index, columns=ratings_matrix.index)
 
-# --- Content Similarity ---
-if os.path.exists("content_similarity.pkl"):
-    content_similarity = joblib.load("content_similarity.pkl")
-else:
+st.write("✅ Data preprocessing done!")
+
+# For simplicity, we use genres as content features
+@st.cache_data
+def compute_content_similarity(movies_df):
+    movies_df['genres'] = movies_df['genres'].fillna('')
     from sklearn.feature_extraction.text import TfidfVectorizer
     tfidf = TfidfVectorizer(stop_words='english')
-    movies['genres'] = movies['genres'].fillna('')
-    tfidf_matrix = tfidf.fit_transform(movies['genres'])
-    content_similarity = linear_kernel(tfidf_matrix, tfidf_matrix)
-    joblib.dump(content_similarity, "content_similarity.pkl")
+    tfidf_matrix = tfidf.fit_transform(movies_df['genres'])
+    from sklearn.metrics.pairwise import linear_kernel
+    return linear_kernel(tfidf_matrix, tfidf_matrix)
 
-# --- Collaborative Filtering ---
-if os.path.exists("ratings_matrix.pkl") and os.path.exists("user_sim_df.pkl"):
-    ratings_matrix = joblib.load("ratings_matrix.pkl")
-    user_sim_df = joblib.load("user_sim_df.pkl")
-else:
-    ratings_agg = ratings.groupby(['userId','movieId'])['rating'].mean().reset_index()
-    ratings_matrix = ratings_agg.pivot(index="userId", columns="movieId", values="rating").fillna(0)
-    user_sim = cosine_similarity(ratings_matrix)
-    user_sim_df = pd.DataFrame(user_sim, index=ratings_matrix.index, columns=ratings_matrix.index)
-    joblib.dump(ratings_matrix, "ratings_matrix.pkl")
-    joblib.dump(user_sim_df, "user_sim_df.pkl")
+content_similarity = compute_content_similarity(movies)
+st.write("✅ Content similarity matrix ready!")
 
-# ====================
-# 🎯 Prediction Functions
-# ====================
+# Content-based prediction
 def content_predict(user_id, movie_id):
     if movie_id not in movies['id'].values:
         return None
     idx = movies[movies['id'] == movie_id].index[0]
     sims = content_similarity[idx]
     user_ratings = ratings[ratings['userId'] == user_id]
-    if user_ratings.empty: return None
+    if user_ratings.empty:
+        return None
     sim_scores = [(row['rating'], sims[movies[movies['id'] == row['movieId']].index[0]])
                   for _, row in user_ratings.iterrows() if row['movieId'] in movies['id'].values]
-    if not sim_scores: return None
+    if not sim_scores:
+        return None
     weighted_sum = sum(r*s for r,s in sim_scores)
     sim_sum = sum(s for _,s in sim_scores)
     return weighted_sum/sim_sum if sim_sum != 0 else None
 
+# Collaborative filtering prediction
 def collab_predict(user_id, movie_id):
     if movie_id not in ratings_matrix.columns or user_id not in user_sim_df.index:
         return None
     sims = user_sim_df[user_id].drop(user_id, errors='ignore')
     top_users = sims.sort_values(ascending=False).head(5).index
-    if top_users.empty: return None
+    if top_users.empty:
+        return None
     top_ratings = ratings_matrix.loc[top_users, movie_id]
     weights = sims.loc[top_users]
-    if weights.sum() == 0: return None
+    if weights.sum() == 0:
+        return None
     return np.dot(top_ratings, weights)/weights.sum()
 
+# Hybrid prediction
 def hybrid_predict(user_id, movie_id, alpha=0.5):
     cp = content_predict(user_id, movie_id)
     cf = collab_predict(user_id, movie_id)
@@ -108,43 +102,40 @@ def hybrid_predict(user_id, movie_id, alpha=0.5):
     if cf is None: return cp
     return alpha*cp + (1-alpha)*cf
 
-# ====================
-# 🖥 Streamlit User Interface
-# ====================
+# Save processed matrices for speed
+joblib.dump(ratings_matrix, "ratings_matrix.joblib")
+joblib.dump(user_sim_df, "user_sim_df.joblib")
+joblib.dump(content_similarity, "content_similarity.joblib")
+
+# Load later if needed
+# ratings_matrix = joblib.load("ratings_matrix.joblib")
+# user_sim_df = joblib.load("user_sim_df.joblib")
+# content_similarity = joblib.load("content_similarity.joblib")
+st.write("✅ Cached matrices saved with joblib!")
+
 st.title("🎬 Movie Recommender System")
 
-user_id = st.number_input("Enter User ID", min_value=1, value=1)
-movie_list = movies['title'].tolist()
-movie_selected = st.selectbox("Select a Movie", movie_list)
+user_id = st.selectbox("Select User ID:", ratings['userId'].unique())
+movie_id = st.selectbox("Select Movie:", movies['title'].values)
+alpha = st.slider("Hybrid Weight (Content vs Collaborative)", 0.0, 1.0, 0.5)
 
-predict_type = st.radio("Prediction Type", ["Content-Based", "Collaborative", "Hybrid"])
 if st.button("Predict Rating"):
-    movie_id = movies[movies['title'] == movie_selected]['id'].values[0]
-    if predict_type == "Content-Based":
-        pred = content_predict(user_id, movie_id)
-    elif predict_type == "Collaborative":
-        pred = collab_predict(user_id, movie_id)
-    else:
-        pred = hybrid_predict(user_id, movie_id)
+    pred = hybrid_predict(user_id, movies[movies['title']==movie_id]['id'].values[0], alpha)
     if pred is not None:
-        st.success(f"Predicted Rating: {pred:.2f} ⭐")
+        st.success(f"Predicted rating for {movie_id}: {pred:.2f}")
     else:
         st.warning("Cannot predict rating for this selection.")
 
-# ====================
-# 📊 Evaluation Section
-# ====================
-from sklearn.metrics import mean_squared_error
-
 def evaluate_model(predict_func, n_samples=300):
-    test = ratings.sample(n_samples, random_state=42)
+    test = ratings_aggregated.sample(n_samples, random_state=42)
     preds, truths = [], []
     for _, row in test.iterrows():
         pred = predict_func(row['userId'], row['movieId'])
         if pred is not None:
             preds.append(pred)
             truths.append(row['rating'])
-    if not preds: return None, None
+    if not preds:
+        return None, None
     mse = mean_squared_error(truths, preds)
     rmse = np.sqrt(mse)
     return mse, rmse
@@ -153,9 +144,15 @@ mse_content, rmse_content = evaluate_model(content_predict)
 mse_collab, rmse_collab = evaluate_model(collab_predict)
 mse_hybrid, rmse_hybrid = evaluate_model(hybrid_predict)
 
-st.subheader("📊 Evaluation Results")
-st.table({
+results_df = pd.DataFrame({
     "System": ["Content-Based", "Collaborative", "Hybrid"],
     "MSE": [mse_content, mse_collab, mse_hybrid],
     "RMSE": [rmse_content, rmse_collab, rmse_hybrid]
 })
+
+st.subheader("📊 Evaluation Results")
+st.dataframe(results_df)
+
+# Visualization
+st.bar_chart(results_df.set_index("System")["RMSE"])
+st.bar_chart(results_df.set_index("System")["MSE"])
