@@ -20,23 +20,30 @@ from sklearn.metrics.pairwise import cosine_similarity, linear_kernel
 st.set_page_config(page_title="Movie Recommender", page_icon="🎬", layout="wide")
 
 # ====================
-# 💾 Load Data (Download from links if not exists)
+# 📥 Load Data
 # ====================
+import pandas as pd
+
+# Movie dataset URLs (from your Drive / Cell 2)
 MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
 CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
 RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
 
-def load_csv(path, url):
-    if not os.path.exists(path):
-        df = pd.read_csv(url)
-        df.to_csv(path, index=False)
-    else:
-        df = pd.read_csv(path)
-    return df
 
-movies = load_csv("movies.csv", MOVIES_URL)
-credits = load_csv("credits.csv", CREDITS_URL)
-ratings = load_csv("ratings.csv", RATINGS_URL)
+# Helper function to download CSVs
+def load_csv(url):
+    return pd.read_csv(url, low_memory=False)  # suppress DtypeWarning
+
+# Load datasets
+movies = load_csv(MOVIES_URL)
+credits = load_csv(CREDITS_URL)
+ratings = load_csv(RATINGS_URL)
+
+# Preview data (optional, for debugging)
+st.write("Movies dataset:", movies.head())
+st.write("Credits dataset:", credits.head())
+st.write("Ratings dataset:", ratings.head())
+
 
 # ====================
 # 🧹 Preprocessing with Joblib
