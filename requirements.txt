@@ -1,9 +1,7 @@
-streamlit==1.26.0
-pandas==2.2.2
-numpy==1.26.2
+streamlit==1.28.0
+pandas==2.1.1
+numpy==1.26.4
 scikit-learn==1.3.2
+matplotlib==3.8.1
+seaborn==0.12.3
 requests==2.32.0
-matplotlib==3.8.0
-seaborn==0.13.2
-jupyter==1.0.0
-ipykernel==6.27.1
