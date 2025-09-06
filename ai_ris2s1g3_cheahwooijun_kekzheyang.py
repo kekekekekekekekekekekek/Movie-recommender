@@ -199,7 +199,7 @@ def evaluate_model(predict_func, ratings_agg, n_samples=300):
     rmse = np.sqrt(mse)
     return mse, rmse
 
-# Cell 7: Main function
+# Cell 7: Main function with fixed Streamlit dropdowns
 movies, ratings = load_data()
 tfidf, vectors = create_tfidf_model(movies)
 ratings, user_item_matrix, user_sim_df = prepare_collaborative_data(movies, ratings)
@@ -210,13 +210,16 @@ def get_recommendations_ui(movie_title, rec_type="Content-Based", user_name="-",
     if rec_type=="Content-Based":
         method_name, recs = content_based_recommend(movie_title, movies, vectors, top_n=num_recs)
     else:
-        resolved_user, recs = hybrid_recommend(user_name, movie_title, movies, vectors, user_item_matrix, user_sim_df, top_n=num_recs)
+        resolved_user, recs = hybrid_recommend(
+            user_name, movie_title, movies, vectors, user_item_matrix, user_sim_df, top_n=num_recs
+        )
         method_name = f"Hybrid Recommendations for {resolved_user}"
     max_score = max([s for _,s in recs]) if recs else 1.0
     rec_list = [(t, (s/max_score)*100) for t,s in recs]
     return rec_list
 
 if IN_COLAB:
+    # Colab → Gradio UI
     demo = gr.Interface(
         fn=get_recommendations_ui,
         inputs=[
@@ -229,11 +232,19 @@ if IN_COLAB:
     )
     demo.launch()
 else:
+    # Streamlit → Dropdowns and slider
     st.title("🎬 Movie Recommender System")
+    
     rec_type = st.radio("Recommendation Type", ["Content-Based","Hybrid"])
+    
+    # User dropdown for Hybrid
     user_choices = ["-","Bob","Alice","Charlie","Diana","Eve"]
     user_choice = st.selectbox("Select User", user_choices) if rec_type=="Hybrid" else "-"
+    
+    # Movie dropdown
     movie_title = st.selectbox("Select a Movie", sorted(movies['title'].unique()))
+    
+    # Number of recommendations
     num_recs = st.slider("Number of Recommendations",1,20,10)
 
     if st.button("Get Recommendations"):
