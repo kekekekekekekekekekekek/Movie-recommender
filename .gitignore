@@ -1,8 +1,4 @@
-__pycache__/
-*.pyc
-*.pyo
-*.ipynb_checkpoints
-.env# Python
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -22,7 +18,3 @@ Thumbs.db
 
 # Streamlit logs
 .streamlit/
-
-.venv/
-.DS_Store
-
