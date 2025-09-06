@@ -7,144 +7,99 @@ Original file is located at
     https://colab.research.google.com/drive/1R2O5ujMSQUzw13LxybT4-Y4ICtWgt2OP
 """
 
-# ====================
-# 📦 Imports & Setup
-# ====================
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-import joblib
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.metrics import mean_squared_error
-import matplotlib.pyplot as plt
-import seaborn as sns
+from joblib import Memory
 
-st.set_page_config(page_title="🎬 Movie Recommender", layout="wide")
+# Cache setup for faster reload
+memory = Memory("./cachedir", verbose=0)
 
-# ====================
-# 💾 Load / Cache Datasets
-# ====================
-@st.cache_data
-def download_csv(url):
-    df = pd.read_csv(url, low_memory=False)
+# Streamlit page config
+st.set_page_config(
+    page_title="Movie Recommender",
+    page_icon="🎬",
+    layout="wide"
+)
+
+# Cell 2: Load CSV data from Google Drive
+@memory.cache
+def load_data_from_drive(movies_url, credits_url, ratings_url):
+    movies = pd.read_csv(movies_url, low_memory=False)
+    credits = pd.read_csv(credits_url)
+    ratings = pd.read_csv(ratings_url)
+
+    # Merge datasets
+    df = movies.merge(credits, on='movieId', how='left')
+    avg_ratings = ratings.groupby('movieId')['rating'].mean().reset_index()
+    df = df.merge(avg_ratings, on='movieId', how='left')
+
+    # Fill missing values
+    df['rating'] = df['rating'].fillna(0)
+    df['genres'] = df['genres'].fillna('')
+    df['overview'] = df['overview'].fillna('')
     return df
 
+# Replace with your Google Drive direct CSV links
 MOVIES_URL = "https://drive.google.com/uc?export=download&id=1GOuUEu1-KgepbjTxIOkbAU8VNJ5lfEg3"
 CREDITS_URL = "https://drive.google.com/uc?export=download&id=10iuK9C87fYLyDLJhqT3bpVv1A2IErmHR"
 RATINGS_URL = "https://drive.google.com/uc?export=download&id=122XJoryYXvv3AUa6F_y1KiCcYdXQjEp4"
 
 
-movies = download_csv(MOVIES_URL)
-credits = download_csv(CREDITS_URL)
-ratings = download_csv(RATINGS_URL)
+df = load_data_from_drive(movies_url, credits_url, ratings_url)
 
-# ====================
-# 🔧 Preprocessing
-# ====================
-# Aggregate duplicate ratings
-ratings_agg = ratings.groupby(['userId','movieId'])['rating'].mean().reset_index()
+# Quick check
+st.write(df.head())
 
-# Pivot for collaborative filtering
-ratings_matrix = ratings_agg.pivot(index="userId", columns="movieId", values="rating").fillna(0)
-
-# User similarity matrix
-user_sim = cosine_similarity(ratings_matrix)
-user_sim_df = pd.DataFrame(user_sim, index=ratings_matrix.index, columns=ratings_matrix.index)
-
-# ====================
-# 📊 Content-Based Similarity
-# ====================
-from sklearn.feature_extraction.text import TfidfVectorizer
-
-@st.cache_data
-def compute_content_similarity(movies_df):
+@memory.cache
+def build_similarity(df):
     tfidf = TfidfVectorizer(stop_words='english')
-    movies_df['overview'] = movies_df['overview'].fillna('')
-    tfidf_matrix = tfidf.fit_transform(movies_df['overview'])
-    return cosine_similarity(tfidf_matrix)
+    df['overview'] = df['overview'].fillna('')
+    tfidf_matrix = tfidf.fit_transform(df['overview'])
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    return cosine_sim
 
-content_similarity = compute_content_similarity(movies)
+cosine_sim = build_similarity(df)
 
-# ====================
-# 🎯 Prediction Functions
-# ====================
-def content_predict(user_id, movie_id):
-    if movie_id not in movies['id'].values: return None
-    idx = movies[movies['id'] == movie_id].index[0]
-    sims = content_similarity[idx]
-    user_ratings = ratings[ratings['userId'] == user_id]
-    sim_scores = [(row['rating'], sims[movies[movies['id']==row['movieId']].index[0]])
-                  for _, row in user_ratings.iterrows() if row['movieId'] in movies['id'].values]
-    if not sim_scores: return None
-    weighted_sum = sum(r*s for r,s in sim_scores)
-    sim_sum = sum(s for _,s in sim_scores)
-    return weighted_sum/sim_sum if sim_sum != 0 else None
+def recommend_movies(title, df, cosine_sim, top_n=10):
+    idx = df[df['title'] == title].index[0]
+    sim_scores = list(enumerate(cosine_sim[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    sim_scores = sim_scores[1:top_n+1]
+    movie_indices = [i[0] for i in sim_scores]
 
-def collab_predict(user_id, movie_id):
-    if movie_id not in ratings_matrix.columns or user_id not in user_sim_df.index: return None
-    sims = user_sim_df[user_id].drop(user_id, errors='ignore')
-    top_users = sims.sort_values(ascending=False).head(5).index
-    if top_users.empty: return None
-    top_ratings = ratings_matrix.loc[top_users, movie_id]
-    weights = sims.loc[top_users]
-    if weights.sum() == 0: return None
-    return np.dot(top_ratings, weights)/weights.sum()
+    recommended = df.iloc[movie_indices].copy()
+    recommended['rating_percent'] = recommended['rating'] * 20  # Convert to 0-100%
+    return recommended[['title', 'genres', 'rating_percent']]
 
-def hybrid_predict(user_id, movie_id, alpha=0.5):
-    cp = content_predict(user_id, movie_id)
-    cf = collab_predict(user_id, movie_id)
-    if cp is None and cf is None: return None
-    if cp is None: return cf
-    if cf is None: return cp
-    return alpha*cp + (1-alpha)*cf
+st.sidebar.header("Filters")
 
-# ====================
-# 🖥 Streamlit UI
-# ====================
-st.title("🎬 Movie Recommender System")
+# Movie selection dropdown
+movie_list = df['title'].sort_values().tolist()
+selected_movie = st.sidebar.selectbox("Select a movie", movie_list)
 
-user_id = st.selectbox("Select User ID", ratings['userId'].unique())
-movie_id = st.selectbox("Select Movie", movies['title'].values)
-alpha = st.slider("Hybrid Weight (Content vs Collaborative)", 0.0, 1.0, 0.5, 0.05)
+# Top N slider
+top_n = st.sidebar.slider("Number of recommendations", 5, 20, 10)
 
-if st.button("Predict Rating"):
-    pred = hybrid_predict(user_id, movies[movies['title']==movie_id]['id'].values[0], alpha)
-    if pred:
-        st.success(f"Predicted rating for **{movie_id}** by user {user_id}: **{pred:.2f} ⭐**")
-    else:
-        st.warning("Not enough data to predict rating.")
+if selected_movie:
+    recommended_movies = recommend_movies(selected_movie, df, cosine_sim, top_n)
 
-# ====================
-# 📊 Model Evaluation
-# ====================
-def evaluate_model(predict_func, n_samples=300):
-    test = ratings_agg.sample(n_samples, random_state=42)
-    preds, truths = [], []
-    for _, row in test.iterrows():
-        pred = predict_func(row['userId'], row['movieId'])
-        if pred is not None:
-            preds.append(pred)
-            truths.append(row['rating'])
-    if not preds: return None, None
-    mse = mean_squared_error(truths, preds)
-    rmse = np.sqrt(mse)
-    return mse, rmse
+    st.subheader(f"Top {top_n} movies similar to '{selected_movie}'")
+    st.dataframe(recommended_movies)
 
-if st.checkbox("Show Evaluation"):
-    mse_content, rmse_content = evaluate_model(content_predict)
-    mse_collab, rmse_collab = evaluate_model(collab_predict)
-    mse_hybrid, rmse_hybrid = evaluate_model(hybrid_predict)
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-    results_df = pd.DataFrame({
-        "System": ["Content-Based", "Collaborative", "Hybrid"],
-        "MSE": [mse_content, mse_collab, mse_hybrid],
-        "RMSE": [rmse_content, rmse_collab, rmse_hybrid]
-    })
-    st.dataframe(results_df)
+# Merge predicted ratings (simple avg rating) with actual ratings
+pred_ratings = df[['movieId', 'rating']].copy()
+actual_ratings = pd.read_csv(ratings_url)
 
-    # Visualization
-    st.subheader("RMSE Comparison")
-    fig, ax = plt.subplots()
-    sns.barplot(x="System", y="RMSE", data=results_df, palette="viridis", ax=ax)
-    st.pyplot(fig)
+# Merge on movieId and userId if needed, for RMSE/MAE
+merged = actual_ratings.merge(pred_ratings, on='movieId', suffixes=('_actual', '_pred'))
+rmse = mean_squared_error(merged['rating_actual'], merged['rating_pred'], squared=False)
+mae = mean_absolute_error(merged['rating_actual'], merged['rating_pred'])
+
+st.subheader("Model Evaluation")
+st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
